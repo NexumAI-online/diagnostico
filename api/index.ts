@@ -5,8 +5,7 @@ import { buildApp } from '../server/app.js';
 const app = buildApp();
 
 export default function handler(req: IncomingMessage, res: ServerResponse) {
-  // @ts-expect-error — Express acepta el par req/res nativo de Node.
-  return app(req, res);
+  return (app as unknown as (req: IncomingMessage, res: ServerResponse) => void)(req, res);
 }
 
 // Vercel: extender maxDuration a 5 min (requiere Pro plan para que surta efecto).
