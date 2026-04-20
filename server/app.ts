@@ -1,5 +1,4 @@
 import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import authRouter from './routes/auth.js';
 import generateRoadmapRouter from './routes/generate-roadmap.js';
@@ -11,22 +10,37 @@ export function buildApp() {
 
   app.set('trust proxy', 1);
 
-  // CORS: solo whitelist explícita. En Vercel el frontend y la API viven en
-  // la misma origin, así que CORS no se aplica al tráfico normal.
-  const devOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
-  const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const allowedOrigins = new Set([...devOrigins, ...extraOrigins]);
-  app.use(cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // misma-origin / curl
-      if (allowedOrigins.has(origin)) return cb(null, true);
-      return cb(new Error('Origin not allowed'));
-    },
-    credentials: true,
-  }));
+  // CORS: acepta same-origin (Vercel) + whitelist de dev + extras por env.
+  const devOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
+  const extraOrigins = new Set(
+    (process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+  app.use((req, res, next) => {
+    const origin = req.headers.origin as string | undefined;
+    if (!origin) return next(); // curl / same-origin sin header
+
+    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host = req.headers.host;
+    const sameOrigin = host && origin === `${proto}://${host}`;
+
+    const allowed = sameOrigin || devOrigins.has(origin) || extraOrigins.has(origin);
+    if (!allowed) return res.status(403).json({ error: 'Origin not allowed' });
+
+    // Headers CORS manuales (más seguros que confiar en el paquete cors con whitelist dinámica)
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      return res.status(204).end();
+    }
+    next();
+  });
 
   app.use(cookieParser());
   app.use(express.json({ limit: '10mb' }));
